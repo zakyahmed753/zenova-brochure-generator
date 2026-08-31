@@ -23,6 +23,9 @@ const LAUNCH_ARGS = [
 async function launch(): Promise<Browser> {
   return puppeteer.launch({
     headless: true,
+    // In the container this is the apt-installed Chromium; locally it's undefined
+    // so Puppeteer uses its own downloaded browser.
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: LAUNCH_ARGS,
     timeout: 60_000,
     // Cap every DevTools command so a wedged renderer rejects instead of hanging.
