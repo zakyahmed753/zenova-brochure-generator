@@ -131,6 +131,7 @@ async function main() {
         branch: cfg.branch,
         autoDeploy: "yes",
         serviceDetails: {
+          env: "docker",
           runtime: "docker",
           plan: cfg.plan,
           region: cfg.region,
