@@ -5,7 +5,6 @@ import type {
   MLCEngineInterface,
 } from "@mlc-ai/web-llm";
 import {
-  ASSISTANT_JSON_SCHEMA,
   buildAssistantMessages,
   parseAssistantReply,
   type AssistantDraft,
@@ -96,31 +95,59 @@ export function engineReady(modelId: string): boolean {
   return engine !== null && loadedModelId === modelId;
 }
 
+/** Give up on a single generation after this long and show a helpful error. */
+const GENERATION_TIMEOUT_MS = 75_000;
+
 /**
  * Run one extraction, streaming the reply. `onToken` receives the growing text
  * so the UI can show live progress. Requires `loadEngine` to have resolved.
+ *
+ * Uses plain JSON mode (not grammar-constrained decoding) — the schema grammar
+ * roughly halved token speed and could stall on weak GPUs; `parseAssistantReply`
+ * repairs the occasional sloppy shape instead.
  */
 export async function runAssistant(
   userText: string,
   onToken?: (soFar: string) => void,
 ): Promise<AssistantDraft> {
-  if (!engine) throw new Error("The AI model isn't loaded yet.");
+  const eng = engine;
+  if (!eng) throw new Error("The AI model isn't loaded yet.");
 
-  const stream = await engine.chat.completions.create({
-    messages: buildAssistantMessages(userText),
-    response_format: { type: "json_object", schema: ASSISTANT_JSON_SCHEMA },
-    temperature: 0.3,
-    max_tokens: 1024,
-    stream: true,
-  });
-
-  let content = "";
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content ?? "";
-    if (delta) {
-      content += delta;
-      onToken?.(content);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      eng.interruptGenerate();
+    } catch {
+      /* nothing to interrupt */
     }
+  }, GENERATION_TIMEOUT_MS);
+
+  try {
+    const stream = await eng.chat.completions.create({
+      messages: buildAssistantMessages(userText),
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      max_tokens: 800,
+      stream: true,
+    });
+
+    let content = "";
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? "";
+      if (delta) {
+        content += delta;
+        onToken?.(content);
+      }
+    }
+
+    if (timedOut || !content.trim()) {
+      throw new Error(
+        "The model is too slow on this device — switch to the “Fastest” model, or fill the wizard by hand.",
+      );
+    }
+    return parseAssistantReply(content);
+  } finally {
+    clearTimeout(timer);
   }
-  return parseAssistantReply(content);
 }

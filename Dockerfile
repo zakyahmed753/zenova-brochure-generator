@@ -6,9 +6,11 @@ WORKDIR /app
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 COPY package.json package-lock.json ./
 RUN npm ci
-# Puppeteer downloads Chrome on install — surface where it landed in the build log.
-RUN node -e "(async()=>{const p=require('puppeteer');console.log('chrome path:',await p.executablePath())})()" \
-    && find /app/.cache/puppeteer -type f -name chrome
+# Puppeteer's postinstall doesn't reliably fetch the browser under `npm ci`, so
+# install it explicitly into PUPPETEER_CACHE_DIR and fail the build if it's absent.
+RUN npx --yes puppeteer browsers install chrome \
+    && CHROME="$(find /app/.cache/puppeteer -type f -name chrome | head -1)" \
+    && test -n "$CHROME" && echo "downloaded: $CHROME"
 
 # ---------- builder: compile the Next.js app ----------
 FROM node:22-bookworm-slim AS builder

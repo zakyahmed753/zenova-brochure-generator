@@ -60,18 +60,34 @@ export const ASSISTANT_JSON_SCHEMA: string = JSON.stringify(
 
 /* ------------------------------ Prompting ------------------------------ */
 
-export const ASSISTANT_SYSTEM_PROMPT = `You turn a real-estate agent's free-text description into a structured brochure draft.
+export const ASSISTANT_SYSTEM_PROMPT = `You turn a real-estate agent's free-text description into a JSON brochure draft.
+
+Reply with ONE JSON object, nothing else (no prose, no markdown fences). Shape:
+{
+  "companyName": "string (only if a firm is named)",
+  "coverTitle": "string (only if a collection/portfolio name is given)",
+  "coverSubtitle": "string (optional)",
+  "template": "editorial" | "classic" | "bold",
+  "pageSize": "A4" | "Letter",
+  "listings": [
+    {
+      "title": "short marketing headline (required)",
+      "subtitle": "e.g. area / compound",
+      "price": "as written, e.g. EGP 12,500,000",
+      "address": "string",
+      "propertyType": "Villa | Apartment | Land | Office | ...",
+      "features": [ { "label": "Bedrooms", "value": "4" }, { "label": "Area", "value": "320 m²" } ],
+      "highlights": [ "short selling point", "another one" ],
+      "pages": [ { "heading": "Overview", "body": "2-4 appealing but truthful sentences" } ]
+    }
+  ]
+}
 
 Rules:
-- Output JSON only, matching the provided schema. No prose, no markdown.
-- "listings" must have at least one entry. Split the text into one listing per distinct property.
-- Every listing needs a short marketing "title". Use "propertyType" for the kind of property (Villa, Apartment, Land, Office...).
-- Put concrete numbers in "features" as {label, value} pairs, e.g. {"label":"Bedrooms","value":"4"}, {"label":"Area","value":"320 m²"}.
-- "highlights" are short selling-point phrases (3-8 words each).
-- "pages": usually one page with heading "Overview" and a "body" of 2-4 sentences of appealing but truthful copy. Add more pages only if the description clearly has distinct sections (e.g. location, finishes, payment plan).
-- NEVER invent prices, measurements, addresses or amenities the user did not state. Omit a field rather than guess.
-- "coverTitle"/"coverSubtitle" only if the user gave a portfolio/collection name. "companyName" only if a firm is named.
-- "template": "editorial" (default), "classic", or "bold". "pageSize": "A4" (default) or "Letter".`;
+- "listings" has at least one entry — one per distinct property in the text.
+- Keep every string short. Usually one page ("Overview"); add pages only for clearly separate sections (location, finishes, payment plan).
+- NEVER invent prices, measurements, addresses or amenities the user didn't state — omit the field instead.
+- Omit any optional field you have no value for. Default template "editorial", pageSize "A4".`;
 
 export function buildAssistantMessages(userText: string) {
   return [
@@ -81,21 +97,69 @@ export function buildAssistantMessages(userText: string) {
 }
 
 /**
- * Parse a model reply into a validated draft. Constrained decoding already
- * guarantees valid JSON, but we still guard against an empty/garbled reply.
+ * Parse a model reply into a validated draft. Without grammar-constrained
+ * decoding the model can be a little sloppy, so this repairs common shape
+ * mistakes (draft not wrapped in `listings`, a bare object, stray text) before
+ * validating.
  */
 export function parseAssistantReply(raw: string): AssistantDraft {
   let json: unknown;
   try {
     json = JSON.parse(extractJsonObject(raw));
   } catch {
-    throw new Error("The assistant didn't return usable JSON — try rephrasing your description.");
+    throw new Error("The assistant didn't return usable JSON — try rephrasing, or the Fastest model.");
   }
-  const parsed = assistantDraftSchema.safeParse(json);
+
+  const obj = (json && typeof json === "object" ? json : {}) as Record<string, unknown>;
+
+  // Accept a few shapes: {listings:[…]}, a bare listing object, or {property:{…}}.
+  let listings: unknown =
+    obj.listings ?? obj.properties ?? (obj.title || obj.propertyType ? [obj] : obj.property ? [obj.property] : []);
+  if (!Array.isArray(listings)) listings = [listings];
+
+  const candidate = {
+    companyName: str(obj.companyName),
+    coverTitle: str(obj.coverTitle ?? obj.title),
+    coverSubtitle: str(obj.coverSubtitle),
+    template: ["editorial", "classic", "bold"].includes(str(obj.template))
+      ? (obj.template as string)
+      : undefined,
+    pageSize: str(obj.pageSize) === "Letter" ? "Letter" : undefined,
+    listings: (listings as unknown[])
+      .map((l) => (l && typeof l === "object" ? (l as Record<string, unknown>) : {}))
+      .filter((l) => str(l.title) || str(l.propertyType) || str(l.subtitle))
+      .map((l) => ({
+        title: str(l.title) || str(l.name) || str(l.headline) || "Property",
+        subtitle: str(l.subtitle) || undefined,
+        price: str(l.price) || undefined,
+        address: str(l.address) || undefined,
+        propertyType: str(l.propertyType) || str(l.type) || undefined,
+        features: Array.isArray(l.features)
+          ? (l.features as unknown[])
+              .map((f) => (f && typeof f === "object" ? (f as Record<string, unknown>) : {}))
+              .filter((f) => str(f.label) && str(f.value))
+              .map((f) => ({ label: str(f.label), value: str(f.value) }))
+          : undefined,
+        highlights: Array.isArray(l.highlights)
+          ? (l.highlights as unknown[]).map(str).filter(Boolean)
+          : undefined,
+        pages: Array.isArray(l.pages)
+          ? (l.pages as unknown[])
+              .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
+              .map((p) => ({ heading: str(p.heading) || undefined, body: str(p.body) || undefined }))
+          : undefined,
+      })),
+  };
+
+  const parsed = assistantDraftSchema.safeParse(candidate);
   if (!parsed.success) {
-    throw new Error("The assistant's draft didn't match the expected shape — try again.");
+    throw new Error("Couldn't turn that into a brochure draft — try rephrasing your description.");
   }
   return parsed.data;
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
 }
 
 function extractJsonObject(raw: string): string {
