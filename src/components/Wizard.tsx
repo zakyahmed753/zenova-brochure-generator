@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { fileToResizedDataUrl } from "@/lib/image";
 import { buildBrochureHtml } from "@/lib/brochure-template";
 import { BRAND_KEY, DRAFT_KEY, defaultOptions, emptyBrand } from "@/lib/defaults";
@@ -1177,34 +1177,41 @@ function ListingEditor({
           Key facts
         </span>
         <p className="mb-2 text-xs text-neutral-400">
-          Each fact shows in the PDF as a tile: the value on top, the name under it. Fill both —
-          a fact with no value is left out.
+          Each row becomes a tile in the PDF — the <strong>value</strong> big on top, the{" "}
+          <strong>name</strong> under it (e.g. 4 / Bedrooms).
         </p>
-        <div className="grid gap-2 sm:grid-cols-2">
+
+        <div className="grid grid-cols-[1fr_7rem] gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+            Name
+          </span>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+            Value
+          </span>
           {listing.features.map((f, i) => {
             const unnamed = f.value.trim() && !f.label.trim();
             return (
-              <div key={i}>
-                <div className="flex gap-2">
-                  <input
-                    className={`${inputCls} flex-1 ${unnamed ? "border-amber-400" : ""}`}
-                    value={f.label}
-                    onChange={(e) => setFeature(i, { label: e.target.value })}
-                    placeholder="Name — e.g. Bathrooms"
-                  />
-                  <input
-                    className={`${inputCls} w-24 shrink-0`}
-                    value={f.value}
-                    onChange={(e) => setFeature(i, { value: e.target.value })}
-                    placeholder="Value"
-                  />
-                </div>
+              <Fragment key={i}>
+                <input
+                  className={`rounded-md border px-3 py-2 text-sm outline-none focus:border-neutral-900 ${
+                    unnamed ? "border-amber-400 bg-amber-50" : "border-neutral-300"
+                  }`}
+                  value={f.label}
+                  onChange={(e) => setFeature(i, { label: e.target.value })}
+                  placeholder="e.g. Bathrooms"
+                />
+                <input
+                  className="rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900"
+                  value={f.value}
+                  onChange={(e) => setFeature(i, { value: e.target.value })}
+                  placeholder="e.g. 3"
+                />
                 {unnamed && (
-                  <p className="mt-0.5 text-[11px] text-amber-600">
-                    Add a name or “{f.value.trim()}” shows with no label in the PDF.
+                  <p className="col-span-2 -mt-1 text-[11px] text-amber-600">
+                    Give this a name, or “{f.value.trim()}” prints with no label.
                   </p>
                 )}
-              </div>
+              </Fragment>
             );
           })}
         </div>
