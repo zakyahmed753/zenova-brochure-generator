@@ -1181,22 +1181,32 @@ function ListingEditor({
           a fact with no value is left out.
         </p>
         <div className="grid gap-2 sm:grid-cols-2">
-          {listing.features.map((f, i) => (
-            <div key={i} className="flex gap-2">
-              <input
-                className={`${inputCls} flex-1`}
-                value={f.label}
-                onChange={(e) => setFeature(i, { label: e.target.value })}
-                placeholder="Name — e.g. Bathrooms"
-              />
-              <input
-                className={`${inputCls} w-24 shrink-0`}
-                value={f.value}
-                onChange={(e) => setFeature(i, { value: e.target.value })}
-                placeholder="Value"
-              />
-            </div>
-          ))}
+          {listing.features.map((f, i) => {
+            const unnamed = f.value.trim() && !f.label.trim();
+            return (
+              <div key={i}>
+                <div className="flex gap-2">
+                  <input
+                    className={`${inputCls} flex-1 ${unnamed ? "border-amber-400" : ""}`}
+                    value={f.label}
+                    onChange={(e) => setFeature(i, { label: e.target.value })}
+                    placeholder="Name — e.g. Bathrooms"
+                  />
+                  <input
+                    className={`${inputCls} w-24 shrink-0`}
+                    value={f.value}
+                    onChange={(e) => setFeature(i, { value: e.target.value })}
+                    placeholder="Value"
+                  />
+                </div>
+                {unnamed && (
+                  <p className="mt-0.5 text-[11px] text-amber-600">
+                    Add a name or “{f.value.trim()}” shows with no label in the PDF.
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
         <div className="mt-2 flex gap-3 text-xs">
           <button

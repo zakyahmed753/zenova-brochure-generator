@@ -106,9 +106,8 @@ export function parseAssistantReply(raw: string): AssistantDraft {
         propertyType: str(l.propertyType) || str(l.type) || undefined,
         features: Array.isArray(l.features)
           ? (l.features as unknown[])
-              .map((f) => (f && typeof f === "object" ? (f as Record<string, unknown>) : {}))
-              .filter((f) => str(f.value))
-              .map((f) => ({ label: str(f.label), value: str(f.value) }))
+              .map(coerceFeature)
+              .filter((f): f is Feat => f !== null && f.value.length > 0)
           : undefined,
         highlights: Array.isArray(l.highlights)
           ? (l.highlights as unknown[]).map(str).filter(Boolean)
@@ -130,6 +129,31 @@ export function parseAssistantReply(raw: string): AssistantDraft {
 
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
+}
+
+type Feat = { label: string; value: string };
+
+/** Accept the several shapes small models emit for a key fact. */
+function coerceFeature(f: unknown): Feat | null {
+  if (typeof f === "string") {
+    // "4 Bedrooms" / "Area: 320 m²" -> split into number/label
+    const s = f.trim();
+    const colon = s.match(/^(.+?)\s*[:=]\s*(.+)$/);
+    if (colon) return { label: colon[1].trim(), value: colon[2].trim() };
+    const numFirst = s.match(/^([\d.,]+\s*(?:m²|m2|sqm|sq\.?\s?m)?)\s+(.+)$/i);
+    if (numFirst) return { label: numFirst[2].trim(), value: numFirst[1].trim() };
+    return s ? { label: "", value: s } : null;
+  }
+  if (f && typeof f === "object") {
+    const o = f as Record<string, unknown>;
+    if (str(o.value) || str(o.label)) {
+      return { label: str(o.label ?? o.name ?? o.key), value: str(o.value ?? o.amount) };
+    }
+    // { "Bedrooms": "4" } — label is the key
+    const keys = Object.keys(o);
+    if (keys.length === 1 && str(o[keys[0]])) return { label: keys[0], value: str(o[keys[0]]) };
+  }
+  return null;
 }
 
 function extractJsonObject(raw: string): string {
