@@ -4,13 +4,23 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
+# Skip the flaky postinstall download; do a clean, retried install right after so
+# a half-finished download can't leave a broken cache the build then trips over.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
-# Puppeteer's postinstall doesn't reliably fetch the browser under `npm ci`, so
-# install it explicitly into PUPPETEER_CACHE_DIR and fail the build if it's absent.
-RUN npx --yes puppeteer browsers install chrome \
-    && CHROME="$(find /app/.cache/puppeteer -type f -name chrome | head -1)" \
-    && test -n "$CHROME" && echo "downloaded: $CHROME"
+RUN set -e; \
+    for i in 1 2 3 4; do \
+      npx --yes puppeteer browsers install chrome && break; \
+      echo ">> chrome download attempt $i failed — clearing and retrying"; \
+      npx --yes puppeteer browsers clear || true; \
+      sleep 8; \
+    done; \
+    CHROME="$(find /app/.cache/puppeteer -type f -name chrome | head -1)"; \
+    test -n "$CHROME"; \
+    echo "chrome downloaded: $CHROME"
 
 # ---------- builder: compile the Next.js app ----------
 FROM node:22-bookworm-slim AS builder
