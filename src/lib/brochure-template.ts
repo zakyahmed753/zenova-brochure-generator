@@ -70,13 +70,16 @@ function photoGrid(photos: ListingPage["photos"]): string {
 }
 
 function listingHead(listing: Listing): string {
-  const features = listing.features.length
+  const facts = listing.features
+    .map((f) => ({ label: (f.label ?? "").trim(), value: (f.value ?? "").trim() }))
+    .filter((f) => f.label || f.value);
+  const features = facts.length
     ? `<div class="features">
-        ${listing.features
+        ${facts
           .map(
             (f) => `<div class="feature">
-              <div class="feature-value">${esc(f.value)}</div>
-              <div class="feature-label">${esc(f.label)}</div>
+              ${f.value ? `<div class="feature-value">${esc(f.value)}</div>` : ""}
+              ${f.label ? `<div class="feature-label">${esc(f.label)}</div>` : ""}
             </div>`,
           )
           .join("")}
@@ -229,7 +232,10 @@ export function buildBrochureHtml(req: BrochureRequest): string {
   .cover .scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.5) 0%, rgba(0,0,0,0) 34%, rgba(0,0,0,0) 46%, rgba(0,0,0,.8) 100%); }
   .cover .top { position: relative; z-index: 3; display: flex; align-items: center; justify-content: space-between; padding: 20mm 18mm 0; }
   .cover .bottom { position: relative; z-index: 3; margin-top: auto; padding: 0 18mm 22mm; }
-  .cover .logo { max-height: 16mm; max-width: 60mm; object-fit: contain; filter: brightness(0) invert(1); }
+  /* White chip behind the logo so it reads on the dark cover no matter what
+     colours or transparency the uploaded file has (an invert filter turned
+     opaque logos into a white square). */
+  .cover .logo { max-height: 14mm; max-width: 54mm; object-fit: contain; background: #fff; padding: 2.5mm 3mm; border-radius: 3px; }
   .cover .logo-text { font: 600 18px/1.2 var(--heading); letter-spacing: .04em; }
   .cover h1 { font: 700 ${coverTitleSize}/1.1 var(--heading); max-width: 150mm; margin-bottom: 10px; }
   .cover .subtitle { font-size: 14px; opacity: .92; margin-bottom: 10px; }
@@ -262,10 +268,12 @@ export function buildBrochureHtml(req: BrochureRequest): string {
   .listing-head .address { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
 
   /* Key facts — raised 3D tiles (soft float + beveled top + solid bottom edge). */
-  .features { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5mm; margin-top: 16px; margin-bottom: 4px; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(34mm, 1fr)); gap: 4mm; margin-top: 16px; margin-bottom: 4px; }
+  /* the facts sit below the absolutely-positioned price box, so reclaim the gutter */
+  .listing-head.has-price .features { margin-right: -50mm; }
   .feature {
     position: relative;
-    padding: 15px 10px 14px;
+    padding: 13px 7px 12px;
     text-align: center;
     border-radius: 10px;
     background: linear-gradient(180deg, #ffffff 0%, #eef1f5 100%);
@@ -288,13 +296,14 @@ export function buildBrochureHtml(req: BrochureRequest): string {
     background: var(--accent);
     opacity: 0.85;
   }
-  .feature-value { font: 800 21px/1 var(--body); color: var(--primary); letter-spacing: .01em; }
+  .feature { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 19mm; }
+  .feature-value { font: 800 20px/1.1 var(--body); color: var(--primary); letter-spacing: .01em; }
   .feature-label {
-    margin-top: 6px;
-    font-size: 9px;
-    letter-spacing: .16em;
+    margin-top: 5px;
+    font: 700 9px/1.3 var(--body);
+    letter-spacing: .06em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--ink);
   }
 
   .highlights { list-style: none; columns: 2; column-gap: 12mm; margin-top: 10px; }
@@ -315,7 +324,7 @@ export function buildBrochureHtml(req: BrochureRequest): string {
   /* ---------- Contact ---------- */
   .contact { justify-content: center; padding: 24mm; background: var(--primary); color: #fff; }
   .contact > *:not(.watermark) { position: relative; z-index: 3; }
-  .contact .logo { max-height: 20mm; max-width: 70mm; object-fit: contain; filter: brightness(0) invert(1); margin-bottom: 16mm; }
+  .contact .logo { max-height: 18mm; max-width: 64mm; object-fit: contain; background: #fff; padding: 3mm 4mm; border-radius: 4px; margin-bottom: 16mm; }
   .contact .logo-text { font: 600 22px/1 var(--heading); margin-bottom: 16mm; }
   .contact h3 { font: 400 22px/1.3 var(--heading); margin-bottom: 8px; }
   .contact p { font-size: 12px; line-height: 1.9; opacity: .9; }

@@ -107,7 +107,7 @@ export function parseAssistantReply(raw: string): AssistantDraft {
         features: Array.isArray(l.features)
           ? (l.features as unknown[])
               .map((f) => (f && typeof f === "object" ? (f as Record<string, unknown>) : {}))
-              .filter((f) => str(f.label) && str(f.value))
+              .filter((f) => str(f.value))
               .map((f) => ({ label: str(f.label), value: str(f.value) }))
           : undefined,
         highlights: Array.isArray(l.highlights)
@@ -168,8 +168,8 @@ export function draftToBrochureRequest(
       address: (l.address || "").trim(),
       propertyType: (l.propertyType || "").trim(),
       features: (l.features ?? [])
-        .filter((f) => f.label?.trim() && f.value?.trim())
-        .map((f) => ({ label: f.label.trim(), value: f.value.trim() })),
+        .map((f) => ({ label: (f.label ?? "").trim(), value: (f.value ?? "").trim() }))
+        .filter((f) => f.value),
       highlights: (l.highlights ?? []).map((h) => h.trim()).filter(Boolean),
       pages: draftPages(l),
     })),

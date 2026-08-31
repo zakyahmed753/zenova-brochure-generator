@@ -106,7 +106,9 @@ function buildPayload(
       price: l.price.trim(),
       address: l.address.trim(),
       propertyType: l.propertyType.trim(),
-      features: l.features.filter((f) => f.label.trim() && f.value.trim()),
+      features: l.features
+        .map((f) => ({ label: f.label.trim(), value: f.value.trim() }))
+        .filter((f) => f.value),
       highlights: l.highlights.map((h) => h.trim()).filter(Boolean),
       pages: l.pages
         .map((pg) => ({
@@ -1171,9 +1173,13 @@ function ListingEditor({
       </div>
 
       <div>
-        <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-neutral-500">
+        <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">
           Key facts
         </span>
+        <p className="mb-2 text-xs text-neutral-400">
+          Each fact shows in the PDF as a tile: the value on top, the name under it. Fill both —
+          a fact with no value is left out.
+        </p>
         <div className="grid gap-2 sm:grid-cols-2">
           {listing.features.map((f, i) => (
             <div key={i} className="flex gap-2">
@@ -1181,10 +1187,10 @@ function ListingEditor({
                 className={`${inputCls} flex-1`}
                 value={f.label}
                 onChange={(e) => setFeature(i, { label: e.target.value })}
-                placeholder="Label"
+                placeholder="Name — e.g. Bathrooms"
               />
               <input
-                className={`${inputCls} w-28`}
+                className={`${inputCls} w-24 shrink-0`}
                 value={f.value}
                 onChange={(e) => setFeature(i, { value: e.target.value })}
                 placeholder="Value"

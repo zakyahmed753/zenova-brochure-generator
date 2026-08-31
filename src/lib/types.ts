@@ -9,7 +9,9 @@ import { z } from "zod";
  */
 
 export const featureSchema = z.object({
-  label: z.string().min(1).max(40),
+  // A key fact needs a value (the number). The label ("Bathrooms", "Parking" …)
+  // is shown under it and is optional so a stray blank name doesn't drop the fact.
+  label: z.string().max(40).optional().default(""),
   value: z.string().min(1).max(40),
 });
 
