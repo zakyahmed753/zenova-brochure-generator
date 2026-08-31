@@ -1,0 +1,17 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# In Render: New → Blueprint → point at this repo. Render will create the
+# service AND attach pdf.zonova-tech.com, then show you the DNS target.
+services:
+  - type: web
+    name: zenova-brochure-generator
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard # 2 GB RAM — Chromium + LibreOffice will OOM on smaller plans
+    region: frankfurt # closest Render region to MENA
+    healthCheckPath: /api/health
+    autoDeploy: true
+    domains:
+      - pdf.zonova-tech.com
+    envVars:
+      - key: NODE_ENV
+        value: production
