@@ -94,21 +94,30 @@ export function engineReady(modelId: string): boolean {
 /** Hard ceiling — if a single generation isn't done by here, we give up. */
 const GENERATION_TIMEOUT_MS = 70_000;
 
-/**
- * Run one extraction. Non-streaming and wrapped in a hard timeout: if the model
- * (or the worker) stalls, this REJECTS instead of leaving the UI "drafting"
- * forever. Uses plain JSON mode, not grammar-constrained decoding, which is much
- * faster on weak GPUs; `parseAssistantReply` repairs a sloppy shape.
- */
-export async function runAssistant(userText: string): Promise<AssistantDraft> {
-  const eng = engine;
-  if (!eng) throw new Error("The AI model isn't loaded yet.");
+function asMessage(e: unknown): string {
+  if (typeof e === "string") return e;
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string") return m;
+    try {
+      return JSON.stringify(e).slice(0, 300);
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(e);
+}
 
+async function generateOnce(eng: MLCEngineInterface, userText: string): Promise<string> {
   const generate = eng.chat.completions.create({
     messages: buildAssistantMessages(userText),
-    response_format: { type: "json_object" },
+    // Plain text — NOT grammar/JSON-constrained decoding. XGrammar adds latency
+    // and can throw on some GPUs; the prompt asks for JSON and the parser repairs
+    // sloppy output.
+    response_format: { type: "text" },
     temperature: 0.2,
-    max_tokens: 768,
+    max_tokens: 512,
     stream: false,
   });
 
@@ -120,20 +129,47 @@ export async function runAssistant(userText: string): Promise<AssistantDraft> {
       } catch {
         /* nothing to interrupt */
       }
-      reject(
-        new Error(
-          "The AI is too slow on this device. Pick the “Fast (default)” model, or fill the wizard by hand.",
-        ),
-      );
+      reject(new Error("timeout"));
     }, GENERATION_TIMEOUT_MS);
   });
 
   try {
     const res = await Promise.race([generate, guard]);
-    const content = res.choices?.[0]?.message?.content ?? "";
-    if (!content.trim()) throw new Error("The AI returned nothing — try again or rephrase.");
-    return parseAssistantReply(content);
+    return res.choices?.[0]?.message?.content ?? "";
   } finally {
     clearTimeout(timer!);
   }
+}
+
+/**
+ * Run one extraction. Non-streaming, hard timeout, one retry. Any failure
+ * REJECTS with a readable message instead of leaving the UI stuck "drafting".
+ */
+export async function runAssistant(userText: string): Promise<AssistantDraft> {
+  const eng = engine;
+  if (!eng) throw new Error("The AI model isn't loaded yet.");
+
+  let content = "";
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      content = await generateOnce(eng, userText);
+      if (content.trim()) break;
+      lastErr = new Error("empty reply");
+    } catch (e) {
+      lastErr = e;
+      if (asMessage(e) === "timeout" && attempt === 2) {
+        throw new Error(
+          "The AI is too slow on this device — use the “Fast (default)” model, or fill the wizard by hand.",
+        );
+      }
+    }
+  }
+
+  if (!content.trim()) {
+    throw new Error(
+      `The AI couldn't produce a draft (${asMessage(lastErr)}). Try again, or fill the wizard by hand.`,
+    );
+  }
+  return parseAssistantReply(content);
 }

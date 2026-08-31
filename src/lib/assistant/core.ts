@@ -53,41 +53,11 @@ export const assistantDraftSchema = z.object({
 export type AssistantDraft = z.infer<typeof assistantDraftSchema>;
 export type DraftListing = z.infer<typeof draftListingSchema>;
 
-/** JSON Schema string handed to WebLLM for grammar-constrained decoding. */
-export const ASSISTANT_JSON_SCHEMA: string = JSON.stringify(
-  z.toJSONSchema(assistantDraftSchema, { target: "draft-2020-12" }),
-);
-
 /* ------------------------------ Prompting ------------------------------ */
 
-export const ASSISTANT_SYSTEM_PROMPT = `You turn a real-estate agent's free-text description into a JSON brochure draft.
-
-Reply with ONE JSON object, nothing else (no prose, no markdown fences). Shape:
-{
-  "companyName": "string (only if a firm is named)",
-  "coverTitle": "string (only if a collection/portfolio name is given)",
-  "coverSubtitle": "string (optional)",
-  "template": "editorial" | "classic" | "bold",
-  "pageSize": "A4" | "Letter",
-  "listings": [
-    {
-      "title": "short marketing headline (required)",
-      "subtitle": "e.g. area / compound",
-      "price": "as written, e.g. EGP 12,500,000",
-      "address": "string",
-      "propertyType": "Villa | Apartment | Land | Office | ...",
-      "features": [ { "label": "Bedrooms", "value": "4" }, { "label": "Area", "value": "320 m²" } ],
-      "highlights": [ "short selling point", "another one" ],
-      "pages": [ { "heading": "Overview", "body": "2-4 appealing but truthful sentences" } ]
-    }
-  ]
-}
-
-Rules:
-- "listings" has at least one entry — one per distinct property in the text.
-- Keep every string short. Usually one page ("Overview"); add pages only for clearly separate sections (location, finishes, payment plan).
-- NEVER invent prices, measurements, addresses or amenities the user didn't state — omit the field instead.
-- Omit any optional field you have no value for. Default template "editorial", pageSize "A4".`;
+export const ASSISTANT_SYSTEM_PROMPT = `Turn the property description into ONE JSON object, nothing else. Format:
+{"listings":[{"title":"short headline","subtitle":"area","price":"as written","propertyType":"Villa/Apartment/Land","features":[{"label":"Bedrooms","value":"4"},{"label":"Area","value":"320 m2"}],"highlights":["selling point"],"pages":[{"heading":"Overview","body":"2-3 appealing true sentences"}]}]}
+Rules: one listing per property. Omit any field you have no value for. Never invent prices/sizes/amenities not stated. Keep strings short.`;
 
 export function buildAssistantMessages(userText: string) {
   return [
