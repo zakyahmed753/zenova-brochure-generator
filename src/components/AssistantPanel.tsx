@@ -88,13 +88,15 @@ export default function AssistantPanel({
       return;
     }
     setError(null);
-    setElapsed(0);
-    setPhase("thinking");
     try {
       if (!engineReady(modelId)) {
+        setPhase("loading"); // still downloading/compiling — don't say "Drafting"
         await loadEngine(modelId, onProgress);
-        if (alive.current) setProgress(null);
+        if (!alive.current) return;
+        setProgress(null);
       }
+      setElapsed(0);
+      setPhase("thinking");
       const draft = await runAssistant(text);
       if (!alive.current) return;
       setPhase("ready");
