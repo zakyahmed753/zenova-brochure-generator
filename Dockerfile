@@ -6,8 +6,9 @@ WORKDIR /app
 ENV PUPPETEER_CACHE_DIR=/app/.cache/puppeteer
 COPY package.json package-lock.json ./
 RUN npm ci
-# Puppeteer downloads Chrome on install; make sure it actually landed.
-RUN node -e "const p=require('puppeteer');const fs=require('fs');const e=p.executablePath();console.log('chrome:',e);if(!fs.existsSync(e))process.exit(1)"
+# Puppeteer downloads Chrome on install — surface where it landed in the build log.
+RUN node -e "(async()=>{const p=require('puppeteer');console.log('chrome path:',await p.executablePath())})()" \
+    && find /app/.cache/puppeteer -type f -name chrome
 
 # ---------- builder: compile the Next.js app ----------
 FROM node:22-bookworm-slim AS builder
@@ -54,8 +55,8 @@ COPY --from=builder --chown=app:app /app/public ./public
 COPY --from=builder --chown=app:app /app/.cache/puppeteer /app/.cache/puppeteer
 
 # Fail the build (not production) if the Chrome binary didn't make it into the image.
-RUN find /app/.cache/puppeteer -type f -name chrome | head -1 | grep -q . \
-    && echo "chrome present" || (echo "chrome MISSING from image" && exit 1)
+RUN CHROME="$(find /app/.cache/puppeteer -type f -name chrome | head -1)"; \
+    if [ -n "$CHROME" ]; then echo "chrome in image: $CHROME"; else echo "chrome MISSING"; exit 1; fi
 
 USER app
 EXPOSE 3000
