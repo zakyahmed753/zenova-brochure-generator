@@ -1,4 +1,4 @@
-import puppeteer, { type Browser } from "puppeteer";
+import puppeteer, { type Browser, type Page } from "puppeteer";
 import { buildBrochureHtml } from "./brochure-template";
 import type { BrochureRequest } from "./types";
 
@@ -9,13 +9,29 @@ import type { BrochureRequest } from "./types";
  */
 let browserPromise: Promise<Browser> | null = null;
 
+const LAUNCH_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  // Containers (Render, most PaaS) ship a 64 MB /dev/shm; without this Chromium
+  // hangs or crashes on any non-trivial page. This is the usual "PDF route times
+  // out in prod but works locally" culprit.
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--font-render-hinting=none",
+];
+
+async function launch(): Promise<Browser> {
+  return puppeteer.launch({
+    headless: true,
+    args: LAUNCH_ARGS,
+    timeout: 60_000,
+    // Cap every DevTools command so a wedged renderer rejects instead of hanging.
+    protocolTimeout: 90_000,
+  });
+}
+
 async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--font-render-hinting=none"],
-    });
-  }
+  if (!browserPromise) browserPromise = launch();
   try {
     const b = await browserPromise;
     if (b.connected) return b;
@@ -24,6 +40,34 @@ async function getBrowser(): Promise<Browser> {
   }
   browserPromise = null;
   return getBrowser();
+}
+
+/** Drop the shared browser so the next request starts a fresh one. */
+async function resetBrowser(): Promise<void> {
+  const p = browserPromise;
+  browserPromise = null;
+  try {
+    const b = await p;
+    await b?.close();
+  } catch {
+    /* already gone */
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }
 
 const SHEET = {
@@ -36,7 +80,7 @@ const SHEET = {
  * mid-decode when `page.pdf()` fires — which prints the photo as a blank box.
  * Force every image to finish decoding first.
  */
-async function waitForImages(page: import("puppeteer").Page): Promise<void> {
+async function waitForImages(page: Page): Promise<void> {
   await page
     .evaluate(async () => {
       await Promise.all(
@@ -56,6 +100,39 @@ async function waitForImages(page: import("puppeteer").Page): Promise<void> {
       );
     })
     .catch(() => {});
+}
+
+/**
+ * Render `html` to a PDF, guarded end-to-end so a stuck Chromium fails the
+ * request (and recycles the browser) instead of hanging forever.
+ */
+async function renderHtmlToPdf(
+  html: string,
+  pageSize: "A4" | "Letter",
+): Promise<Uint8Array> {
+  const browser = await getBrowser();
+  let page: Page | null = null;
+  try {
+    page = await withTimeout(browser.newPage(), 20_000, "newPage");
+    await withTimeout(
+      page.setContent(html, { waitUntil: "load", timeout: 30_000 }),
+      35_000,
+      "setContent",
+    );
+    await page.evaluate(() => document.fonts.ready).catch(() => {});
+    await waitForImages(page);
+    return await withTimeout(
+      page.pdf({ format: pageSize, printBackground: true, preferCSSPageSize: true }),
+      60_000,
+      "page.pdf",
+    );
+  } catch (err) {
+    // A timeout usually means the browser is wedged — start fresh next time.
+    await resetBrowser();
+    throw err;
+  } finally {
+    await page?.close().catch(() => {});
+  }
 }
 
 /**
@@ -79,35 +156,9 @@ export async function renderImagesPdf(
     img { max-width: 100%; max-height: 100%; object-fit: contain; }
   </style></head><body>${body}</body></html>`;
 
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-  try {
-    await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
-    await waitForImages(page);
-    return await page.pdf({
-      format: pageSize,
-      printBackground: true,
-      preferCSSPageSize: true,
-    });
-  } finally {
-    await page.close();
-  }
+  return renderHtmlToPdf(html, pageSize);
 }
 
 export async function renderBrochurePdf(req: BrochureRequest): Promise<Uint8Array> {
-  const html = buildBrochureHtml(req);
-  const browser = await getBrowser();
-  const page = await browser.newPage();
-  try {
-    await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
-    await page.evaluate(() => document.fonts.ready);
-    await waitForImages(page);
-    return await page.pdf({
-      format: req.options.pageSize,
-      printBackground: true,
-      preferCSSPageSize: true,
-    });
-  } finally {
-    await page.close();
-  }
+  return renderHtmlToPdf(buildBrochureHtml(req), req.options.pageSize);
 }
