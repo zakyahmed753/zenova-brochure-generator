@@ -31,15 +31,19 @@ async function launch(): Promise<Browser> {
 }
 
 async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) browserPromise = launch();
-  try {
-    const b = await browserPromise;
-    if (b.connected) return b;
-  } catch {
-    // fall through to relaunch
+  // At most two attempts — never loop forever if Chromium can't start at all.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    if (!browserPromise) browserPromise = launch();
+    try {
+      const b = await browserPromise;
+      if (b.connected) return b;
+      browserPromise = null;
+    } catch (err) {
+      browserPromise = null;
+      if (attempt === 2) throw err;
+    }
   }
-  browserPromise = null;
-  return getBrowser();
+  throw new Error("PDF renderer (Chromium) failed to start");
 }
 
 /** Drop the shared browser so the next request starts a fresh one. */

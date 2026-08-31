@@ -35,7 +35,8 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
-    console.error("PDF generation failed", err);
-    return NextResponse.json({ error: "PDF generation failed" }, { status: 500 });
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("PDF generation failed:", detail, err instanceof Error ? err.stack : "");
+    return NextResponse.json({ error: "PDF generation failed", detail }, { status: 500 });
   }
 }
