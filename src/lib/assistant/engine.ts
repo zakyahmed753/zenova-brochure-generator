@@ -1,9 +1,6 @@
 "use client";
 
-import type {
-  InitProgressReport,
-  MLCEngineInterface,
-} from "@mlc-ai/web-llm";
+import type { InitProgressReport, MLCEngineInterface } from "@mlc-ai/web-llm";
 import {
   buildAssistantMessages,
   parseAssistantReply,
@@ -13,27 +10,26 @@ import {
 /**
  * Client-only wrapper around WebLLM. The model runs entirely in the visitor's
  * browser via WebGPU — no server, no API key, no per-use cost. Inference runs in
- * a Web Worker so the page never freezes, and generation is streamed so the user
- * sees progress instead of a long blank wait.
+ * a Web Worker so the page never freezes.
  */
 
 export type ModelOption = { id: string; label: string; note: string };
 
 export const MODEL_OPTIONS: ModelOption[] = [
   {
-    id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
-    label: "Fast",
-    note: "~1.0 GB download",
+    id: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+    label: "Fast (default)",
+    note: "~0.5 GB · best on most laptops",
   },
   {
-    id: "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
-    label: "Fastest",
-    note: "~0.5 GB download",
+    id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+    label: "Better",
+    note: "~1.0 GB · needs a decent GPU",
   },
   {
     id: "Llama-3.2-3B-Instruct-q4f16_1-MLC",
-    label: "Best quality",
-    note: "~1.9 GB download",
+    label: "Best",
+    note: "~1.9 GB · slow without a strong GPU",
   },
 ];
 
@@ -95,59 +91,49 @@ export function engineReady(modelId: string): boolean {
   return engine !== null && loadedModelId === modelId;
 }
 
-/** Give up on a single generation after this long and show a helpful error. */
-const GENERATION_TIMEOUT_MS = 75_000;
+/** Hard ceiling — if a single generation isn't done by here, we give up. */
+const GENERATION_TIMEOUT_MS = 70_000;
 
 /**
- * Run one extraction, streaming the reply. `onToken` receives the growing text
- * so the UI can show live progress. Requires `loadEngine` to have resolved.
- *
- * Uses plain JSON mode (not grammar-constrained decoding) — the schema grammar
- * roughly halved token speed and could stall on weak GPUs; `parseAssistantReply`
- * repairs the occasional sloppy shape instead.
+ * Run one extraction. Non-streaming and wrapped in a hard timeout: if the model
+ * (or the worker) stalls, this REJECTS instead of leaving the UI "drafting"
+ * forever. Uses plain JSON mode, not grammar-constrained decoding, which is much
+ * faster on weak GPUs; `parseAssistantReply` repairs a sloppy shape.
  */
-export async function runAssistant(
-  userText: string,
-  onToken?: (soFar: string) => void,
-): Promise<AssistantDraft> {
+export async function runAssistant(userText: string): Promise<AssistantDraft> {
   const eng = engine;
   if (!eng) throw new Error("The AI model isn't loaded yet.");
 
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    try {
-      eng.interruptGenerate();
-    } catch {
-      /* nothing to interrupt */
-    }
-  }, GENERATION_TIMEOUT_MS);
+  const generate = eng.chat.completions.create({
+    messages: buildAssistantMessages(userText),
+    response_format: { type: "json_object" },
+    temperature: 0.2,
+    max_tokens: 768,
+    stream: false,
+  });
+
+  let timer: ReturnType<typeof setTimeout>;
+  const guard = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      try {
+        eng.interruptGenerate();
+      } catch {
+        /* nothing to interrupt */
+      }
+      reject(
+        new Error(
+          "The AI is too slow on this device. Pick the “Fast (default)” model, or fill the wizard by hand.",
+        ),
+      );
+    }, GENERATION_TIMEOUT_MS);
+  });
 
   try {
-    const stream = await eng.chat.completions.create({
-      messages: buildAssistantMessages(userText),
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      max_tokens: 800,
-      stream: true,
-    });
-
-    let content = "";
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content ?? "";
-      if (delta) {
-        content += delta;
-        onToken?.(content);
-      }
-    }
-
-    if (timedOut || !content.trim()) {
-      throw new Error(
-        "The model is too slow on this device — switch to the “Fastest” model, or fill the wizard by hand.",
-      );
-    }
+    const res = await Promise.race([generate, guard]);
+    const content = res.choices?.[0]?.message?.content ?? "";
+    if (!content.trim()) throw new Error("The AI returned nothing — try again or rephrase.");
     return parseAssistantReply(content);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer!);
   }
 }

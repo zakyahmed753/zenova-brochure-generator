@@ -37,7 +37,7 @@ export default function AssistantPanel({
   const [modelId, setModelId] = useState(DEFAULT_MODEL_ID);
   const [phase, setPhase] = useState<Phase>(engineReady(DEFAULT_MODEL_ID) ? "ready" : "idle");
   const [progress, setProgress] = useState<{ text: string; pct: number } | null>(null);
-  const [streamChars, setStreamChars] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
@@ -47,6 +47,14 @@ export default function AssistantPanel({
       alive.current = false;
     };
   }, []);
+
+  // A ticking "Drafting… Ns" so it's obvious the thing is alive (no streaming).
+  useEffect(() => {
+    if (phase !== "thinking") return;
+    const started = Date.now();
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   const busy = phase === "loading" || phase === "thinking";
 
@@ -80,16 +88,14 @@ export default function AssistantPanel({
       return;
     }
     setError(null);
-    setStreamChars(0);
+    setElapsed(0);
     setPhase("thinking");
     try {
       if (!engineReady(modelId)) {
         await loadEngine(modelId, onProgress);
         if (alive.current) setProgress(null);
       }
-      const draft = await runAssistant(text, (soFar) => {
-        if (alive.current) setStreamChars(soFar.length);
-      });
+      const draft = await runAssistant(text);
       if (!alive.current) return;
       setPhase("ready");
       await onDraft(draft);
@@ -131,8 +137,8 @@ export default function AssistantPanel({
       </div>
 
       <p className="mt-1 text-xs text-neutral-500">
-        Runs in your browser. The chosen model downloads once (then it&apos;s cached) — pick{" "}
-        <strong>Fastest</strong> if the wait is too long.
+        Runs in your browser. The chosen model downloads once (then it&apos;s cached). Weak GPU?
+        Keep it on <strong>Fast (default)</strong>.
       </p>
 
       <textarea
@@ -160,9 +166,7 @@ export default function AssistantPanel({
       )}
 
       {phase === "thinking" && (
-        <p className="mt-3 text-xs text-neutral-500">
-          {streamChars > 0 ? `Drafting… ${streamChars} characters` : "Drafting…"}
-        </p>
+        <p className="mt-3 text-xs text-neutral-500">Drafting… {elapsed}s (stops at ~70s)</p>
       )}
 
       {error && (
@@ -178,9 +182,7 @@ export default function AssistantPanel({
         >
           {phase === "loading" ? "Preparing model…" : phase === "thinking" ? "Drafting…" : ctaLabel}
         </button>
-        {phase === "ready" && (
-          <span className="text-xs text-emerald-600">Model ready</span>
-        )}
+        {phase === "ready" && <span className="text-xs text-emerald-600">Model ready</span>}
         <button
           type="button"
           onClick={() => setText(EXAMPLE)}
